@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import os
 import pandas as pd
 
@@ -15,6 +16,17 @@ db_path = os.path.join(base_dir, "roomie_expenses.db")
 Session = sessionmaker(bind=engine)
 session = Session()
 
+
+@contextmanager
+def get_db_session():
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise e
+    finally:
+        session.close()
 
 def bulk_add_expense_to_db(expenses_data: list) -> int:
     try:
@@ -152,14 +164,15 @@ def update_expense_in_db(expense_id: int, payload: dict):
 
 # ---------- User Helper Functions ----------
 def get_all_users():
-    user_query = (
-        session.query(User).all()
-    )
+    with get_db_session() as db:
+        user_query = (
+            db.query(User).all()
+        )
 
-    users_list = []
-    users_dict = {}
-    for user in user_query:
-        users_list.append(user.name)
-        users_dict[user.name] = user.id 
+        users_list = []
+        users_dict = {}
+        for user in user_query:
+            users_list.append(user.name)
+            users_dict[user.name] = user.id 
 
-    return users_list, users_dict
+        return users_list, users_dict
