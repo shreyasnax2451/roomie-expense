@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import os
 import pandas as pd
+import streamlit as st
 
 from datetime import datetime
 from sqlalchemy import func
@@ -34,6 +35,8 @@ def bulk_add_expense_to_db(expenses_data: list) -> int:
         session.add_all(objs)
         session.commit()
 
+        st.success(f"Expenses Added Successfully. Count Added: {len(objs)}")
+
         return len(objs)
 
     except SQLAlchemyError:
@@ -59,6 +62,8 @@ def add_expense_to_db(source: str, amount: float, added_by: int, month: str, yea
     session.commit()
     expense_id = new_expense.id
     session.close()
+    st.success(f"Added: {source.strip()} — ₹{amount:.2f} — {month} {year}")
+
     return expense_id
 
 
