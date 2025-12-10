@@ -1,114 +1,155 @@
-# app_no_session_state.py
-import streamlit as st
+import altair as alt
 import pandas as pd
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+from typing import Optional
 
-# SQLAlchemy imports if you want real DB
-# from sqlalchemy import func
-# from sqlalchemy.orm import Session
-# from database import SessionLocal
-# from models import User, Expense
+from db.helpers import load_user_totals, load_expenses, get_all_users
+from utils.constants import months, years
+from utils.styles import CARD_CSS
 
-st.set_page_config(page_title="Expenses by User (no session_state)", layout="wide")
-st.title("Expenses by User (no session_state)")
 
-# Helper: Replace with your actual session factory
-def get_session():
-    # from database import SessionLocal
-    # return SessionLocal()
-    return None
+# --- App ---
+st.set_page_config(page_title="Expenses — Dashboard", layout="wide")
+st.title("Home Page - Expenses")
 
-def load_user_totals(session) -> pd.DataFrame:
-    """
-    Returns DataFrame with: user_id, name, total_amount, num_expenses
-    Replace the demo block with a SQLAlchemy query when wiring to DB.
-    """
-    sample = [
-        {"user_id": 1, "name": "Alice", "total_amount": 345.5, "num_expenses": 3},
-        {"user_id": 2, "name": "Bob",   "total_amount": 1200.0, "num_expenses": 5},
-        {"user_id": 3, "name": "Cara",  "total_amount": 75.0, "num_expenses": 1},
-    ]
-    return pd.DataFrame(sample)
+# Month & Year Filters
+st.markdown("## Filters")
 
-def load_expenses(session) -> pd.DataFrame:
-    """Return all expenses as DataFrame. Replace demo with DB query."""
-    sample = [
-        {"id": 1, "source_of_expense": "Office Supplies", "amount": 100.0, "added_by_id": 1, "month": "Dec", "year": 2025, "created_at": datetime.utcnow()},
-        {"id": 2, "source_of_expense": "Team Lunch", "amount": 245.5, "added_by_id": 1, "month": "Dec", "year": 2025, "created_at": datetime.utcnow()},
-        {"id": 3, "source_of_expense": "Laptop repairs", "amount": 1200.0, "added_by_id": 2, "month": "Nov", "year": 2025, "created_at": datetime.utcnow()},
-        {"id": 4, "source_of_expense": "Taxi", "amount": 75.0, "added_by_id": 3, "month": "Dec", "year": 2025, "created_at": datetime.utcnow()},
-        {"id": 5, "source_of_expense": "Snacks", "amount": 0.0, "added_by_id": 2, "month": "Dec", "year": 2025, "created_at": datetime.utcnow()},
-    ]
-    return pd.DataFrame(sample)
+month_options = months
+year_options = years
 
-# Option to use real DB (if wired)
-use_db = st.checkbox("Use real DB (uncheck to use demo data)", value=False)
-session = None
-if use_db:
-    session = get_session()
+col_month, col_year = st.columns(2)
 
-try:
-    user_totals = load_user_totals(session)
-    expenses_df = load_expenses(session)
-finally:
-    if use_db and session is not None:
-        session.close()
+with col_month:
+    selected_month = st.selectbox("Month", ["All"] + month_options)
 
-if user_totals.empty:
-    st.info("No users found.")
-    st.stop()
+with col_year:
+    selected_year = st.selectbox("Year", ["All"] + [str(y) for y in year_options])
 
-# Read selected user from query params (no session_state)
-query_params = st.experimental_get_query_params()
-selected_user_id = None
-if "selected_user" in query_params:
-    try:
-        selected_user_id = int(query_params["selected_user"][0])
-    except Exception:
-        selected_user_id = None
+user_totals = load_user_totals(selected_month, selected_year)
+# format totals for display
+user_totals = user_totals.sort_values("total_amount", ascending=False).reset_index(drop=True)
+user_totals["total_str"] = user_totals["total_amount"].map(lambda x: f"₹{x:,.2f}")
+user_totals["num_str"] = user_totals["num_expenses"].astype(str) + " expenses added"
 
-# UI: show columns for users
-max_columns_in_row = 6
-users = user_totals.to_dict(orient="records")
 
-for i in range(0, len(users), max_columns_in_row):
-    row_users = users[i : i + max_columns_in_row]
-    cols = st.columns(len(row_users))
-    for col, user in zip(cols, row_users):
-        with col:
-            # Highlight selected by showing different header text
-            header = f"{user['name']}"
-            if selected_user_id == int(user["user_id"]):
-                header = f"👉 {header}"
-            st.metric(label=header, value=f"₹{user['total_amount']:.2f}", delta=f"{user['num_expenses']}")
+st.markdown(CARD_CSS, unsafe_allow_html=True)
 
-            # Button sets query param (no session_state)
-            btn_key = f"select_user_{user['user_id']}"
-            if st.button("Show expenses", key=btn_key):
-                # set selected_user in URL query params; this triggers rerun
-                st.experimental_set_query_params(selected_user=str(user["user_id"]))
+# --- Top area: bar chart + tiles ---
+left, right = st.columns([2, 3])
+
+with left:
+    st.subheader("Totals by user")
+    if user_totals.empty:
+        st.info("No users found.")
+    else:
+        chart_df = user_totals[["user_id", "name", "total_amount"]].copy()
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+            .encode(
+                x=alt.X("name:N", title="Roomie", sort=alt.EncodingSortField(field="total_amount", order="descending")),
+                y=alt.Y("total_amount:Q", title="Total (₹)"),
+                tooltip=[alt.Tooltip("name:N"), alt.Tooltip("total_amount:Q", format=",.2f")],
+                color=alt.condition(
+                    alt.datum.total_amount > chart_df["total_amount"].median(),
+                    alt.value("#60a5fa"),
+                    alt.value("#94a3b8")
+                )
+            )
+            .properties(height=320, width="container")
+        )
+        st.altair_chart(chart, use_container_width=True)
+        st.caption("Tip: Click a user's 'View' button on the right to see details.")
+
+with right:
+    st.subheader("Users")
+    max_cols = 2
+    rows = [user_totals.iloc[i : i + max_cols] for i in range(0, len(user_totals), max_cols)]
+    for row in rows:
+        cols = st.columns(len(row))
+        for col, (_, r) in zip(cols, row.iterrows()):
+            with col:
+                # render small card
+                avatar_letter = r["name"][0].upper()
+                html = f"""
+                <div class="user-card">
+                  <div style="display:flex; gap:12px; align-items:center;">
+                    <div class="user-avatar">{avatar_letter}</div>
+                    <div style="flex:1;">
+                      <p class="user-name">{r['name']}</p>
+                      <p class="user-meta">{r['num_str']} • {r['total_str']}</p>
+                    </div>
+                  </div>
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
+
+                # View button sets query param (no session_state)
+                btn_key = f"view_user_{int(r['user_id'])}"
+                if st.button("View", key=btn_key):
+                    # set selected user in URL query params
+                    st.query_params["selected_user"] = str(int(r["user_id"]))
 
 st.markdown("---")
 
+params = st.query_params
+selected_user = params.get("selected_user", None)
+selected_user_id: Optional[int] = None
+if selected_user:
+    try:
+        selected_user_id = int(selected_user)
+    except Exception:
+        selected_user_id = None
+
 if selected_user_id is None:
-    st.info("Click *Show expenses* on any user to see their expenses below. (Selection stored in URL query params.)")
+    st.info("Click a user's **View** button to see their expense list here.")
 else:
-    st.subheader(f"Expenses by user id: {selected_user_id}")
-    filtered = expenses_df[expenses_df["added_by_id"] == int(selected_user_id)].copy()
+    st.subheader(f"Expenses:")        
+    filtered = load_expenses(selected_user_id, selected_month, selected_year)
     if filtered.empty:
         st.warning("No expenses found for this user.")
     else:
-        # Format created_at nicely
-        if "created_at" in filtered.columns:
-            filtered["created_at"] = pd.to_datetime(filtered["created_at"])
-            filtered["created_at"] = filtered["created_at"].dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.dataframe(filtered.sort_values(by="created_at", ascending=False), use_container_width=True)
+        filtered["created_at"] = pd.to_datetime(filtered["created_at"])
+        filtered = filtered.sort_values("created_at", ascending=False)
+        filtered["amount_display"] = filtered["amount"].map(lambda x: f"₹{x:,.2f}")
+        display_cols = ["source_of_expense", "amount_display", "month", "year", "created_at"]
 
-        csv = filtered.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name=f"user_{selected_user_id}_expenses.csv",
-            mime="text/csv",
+        display_df = filtered[display_cols].rename(columns={"amount_display": "amount"}).copy()
+        display_df["created_at"] = pd.to_datetime(display_df["created_at"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        # build grid options
+        gb = GridOptionsBuilder.from_dataframe(display_df)
+        gb.configure_default_column(filterable=True, sortable=True, resizable=True, wrapText=True)
+        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=10)
+        gb.configure_side_bar()
+        cell_style_amount = JsCode("""
+        function(params) {
+        return {
+            'textAlign': 'left',
+            'fontWeight': '700',
+            'paddingRight': '12px'
+        }
+        }
+        """)
+        gb.configure_column("source_of_expense", header_name="Source of Expense")
+        gb.configure_column("amount", header_name="Amount (₹)", cellStyle=cell_style_amount)
+        gb.configure_column("created_at", header_name="Created At", width=180)
+        gb.configure_column("month", header_name="Month", width=180)
+        gb.configure_column("year", header_name="Year", width=100)
+
+        grid_opts = gb.build()
+
+        AgGrid(
+            display_df,
+            gridOptions=grid_opts,
+            allow_unsafe_jscode=True,
+            enable_enterprise_modules=False,
+            fit_columns_on_grid_load=True,
+            height=360,
         )
+
+        # Download CSV Option
+        csv = filtered.to_csv(index=False).encode("utf-8")
+        st.download_button("Download CSV", data=csv, file_name=f"user_{selected_user_id}_{selected_month}_{selected_year}_expenses.csv", mime="text/csv")

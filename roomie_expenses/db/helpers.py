@@ -1,7 +1,8 @@
 import os
-import sqlite3
+import pandas as pd
 
 from datetime import datetime
+from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,6 +31,7 @@ def bulk_add_expense_to_db(expenses_data: list) -> int:
         session.close()
     return 0
 
+
 def add_expense_to_db(source: str, amount: float, added_by: int, month: str, year: int):
     new_expense = Expense(
         source_of_expense = source,
@@ -47,18 +49,109 @@ def add_expense_to_db(source: str, amount: float, added_by: int, month: str, yea
     session.close()
     return expense_id
 
-def load_expenses_df():
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query("SELECT * FROM expenses ORDER BY year DESC, month DESC, id DESC", conn)
-    conn.close()
-    if not df.empty:
-        # human-friendly month name
-        df["month_name"] = df["month"].apply(lambda m: datetime(1900, int(m), 1).strftime("%B"))
-    return df
+
+def load_user_totals(selected_month: str = None, selected_year: int = None) -> pd.DataFrame:
+    """
+    Returns DataFrame with: user_id, name, total_amount, num_expenses
+    """
+
+    expenses_data = []
+    expenses_query = (
+        session.query(
+            Expense.added_by_id.label("added_by_id"),
+            User.name.label("name"),
+            func.sum(Expense.amount).label("total_amount"),
+            func.count(Expense.id).label("num_expenses")
+        )
+        .join(User, User.id == Expense.added_by_id)
+    )
+
+    if selected_month and selected_month != "All":
+        expenses_query = expenses_query.filter(Expense.month == selected_month)
+
+    if selected_year and selected_year != "All":
+        expenses_query = expenses_query.filter(Expense.year == int(selected_year))
+
+    expenses_query = (
+        expenses_query
+        .group_by(Expense.added_by_id, User.name)
+        .all()
+    )
+
+    expenses = expenses_query
+    for expense in expenses:
+        expenses_data.append(
+            {
+                "user_id": expense.added_by_id, 
+                "name": expense.name, 
+                "total_amount": float(expense.total_amount), 
+                "num_expenses": expense.num_expenses
+            }
+        )
+    
+    if not expenses_data:
+        _, users_dict = get_all_users()
+        for name, id in users_dict.items():
+            expenses_data.append(
+                {
+                    "user_id": id,
+                    "name": name,
+                    "total_amount": 0, 
+                    "num_expenses": 0,
+                }
+            )
+
+    return pd.DataFrame(expenses_data)
+
+
+def load_expenses(user_id: int, month: str = None, year: int = None) -> pd.DataFrame:
+    """Return all expenses as DataFrame. Replace demo with DB query."""
+    user_expenses = []
+    if user_id and user_id != 'All':
+        expenses_query = (
+            session.query(Expense)
+        ).filter(Expense.added_by_id == int(user_id))
+    else:
+        expenses_query = (
+            session.query(Expense)
+        )
+
+    expenses_query = expenses_query.filter(Expense.month == month) if month and month != "All" else expenses_query
+    expenses_query = expenses_query.filter(Expense.year == year) if year and year != "All" else expenses_query
+    expenses_query = expenses_query.all()
+
+    for user_expense in expenses_query:
+        user_expenses.append(
+            {
+                "id": user_expense.id, 
+                "source_of_expense": user_expense.source_of_expense,
+                "amount": user_expense.amount, 
+                "month": user_expense.month, 
+                "year": user_expense.year, 
+                "created_at": user_expense.created_at
+            }
+        )
+
+    return pd.DataFrame(user_expenses)
+
+def update_expense_in_db(expense_id: int, payload: dict):
+    """Edit the timings, priority, status or invitees of a Task"""
+    expense = (
+        session.query(Expense)
+        .filter_by(id=expense_id)
+        .first()
+    )
+
+    if expense:
+        expense.source_of_expense = payload["source_of_expense"]
+        expense.amount = payload["amount"]
+        session.commit()
+        session.close()
+        return expense_id
 
 
 # ---------- User Helper Functions ----------
-def get_all_user_names():
+def get_all_users():
     user_query = (
         session.query(User).all()
     )

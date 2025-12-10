@@ -1,7 +1,7 @@
 from PIL import Image
 import pytesseract
 
-def parse_expense_to_list(raw_text):
+def parse_expense_to_list(raw_text: str) -> list:
     expense_data = []
     for line in raw_text.split("\n"):
         line = line.strip()
