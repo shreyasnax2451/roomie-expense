@@ -45,10 +45,12 @@ if expense_parser == ExpenseSource.MANUAL_EXPENSE.value:
             st.error("Please enter User info")
         else:
             try:
+                import time
                 amt = float(amount)
                 add_expense_to_db(source.strip(), amt, users_dict.get(added_by), month, int(year))
                 st.toast(f"✅ Added: {source.strip()} — ₹{amt:.2f} ({month} {year})")
-
+                time.sleep(2.25)
+                st.switch_page('Home_Page.py')
             except ValueError as e:
                 st.toast(str(e))
 
