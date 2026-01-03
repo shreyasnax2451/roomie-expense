@@ -46,7 +46,9 @@ if expense_parser == ExpenseSource.MANUAL_EXPENSE.value:
         else:
             try:
                 amt = float(amount)
-                st.toast(f"✅ Added: {source.strip()} — ₹{amount:.2f} ({month} {year})")
+                message = f"✅ Added: {source.strip()} — ₹{amt:.2f} ({month} {year})"
+                st.toast(message)
+                st.toast("Get Here 1")
                 add_expense_to_db(source.strip(), amt, users_dict.get(added_by), month, int(year))
             except ValueError as e:
                 st.toast(str(e))
