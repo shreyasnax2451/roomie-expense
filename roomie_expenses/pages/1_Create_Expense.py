@@ -10,7 +10,12 @@ from utils.enums import ExpenseSource
 from utils.expense_helpers import parse_expense_from_image
 
 # ---------- CONFIG ----------
-ROOMMATES, users_dict = get_all_users()
+@st.cache_data
+def load_users():
+    return get_all_users()
+
+ROOMMATES, users_dict = load_users()
+# ROOMMATES, users_dict = get_all_users()
 
 path = os.path.join(base_dir, "sample_image.png")
 
